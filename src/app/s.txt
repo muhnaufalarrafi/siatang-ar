@@ -1,0 +1,478 @@
+"use client";
+
+// MODIFIKASI: Tambahkan 'useState'
+import React, { useEffect, useRef, useCallback, RefObject, useState } from "react";
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { ARButton } from "three/examples/jsm/webxr/ARButton.js";
+
+// BARU: Impor komponen UI dari file terpisah
+import { ARUserInterface } from "./components/ARUserInterface";
+
+// --- URL Konfigurasi ---
+const MODEL_SCENE_SATU_URL = "/siatangwave.glb";
+const SOUND_SCENE_SATU_URL = "/welcome.mp3";
+const MODEL_SCENE_DUA_URL = "/siatangoption.glb";
+const SOUND_SCENE_DUA_URL = "/welcome.mp3";
+
+const OPTION_1_URL = "https://www.google.com"; // Ganti link ini
+const OPTION_2_URL = "https://www.bing.com";  // Ganti link ini
+
+// --- Constants for Gestures ---
+const GESTURE_CONSTANTS = {
+  ROTATION_SENSITIVITY: 0.01,
+  PAN_SENSITIVITY: 0.01,
+  SCALE_SENSITIVITY: 0.002,
+  MIN_SCALE: 0.1,
+  MAX_SCALE: 3.0,
+  TAP_THRESHOLD: 10, // Jarak piksel maks sebelum sentuhan dianggap "drag"
+};
+
+// --- Type Definition for Three.js state ---
+interface ThreeState {
+  renderer?: THREE.WebGLRenderer;
+  scene?: THREE.Scene;
+  camera?: THREE.PerspectiveCamera;
+  clock?: THREE.Clock;
+  model?: THREE.Group; // Model yang sedang AKTIF
+  mixer?: THREE.AnimationMixer;
+  listener?: THREE.AudioListener; 
+  mainGroup?: THREE.Group; // Grup utama untuk pan & scale
+  raycaster?: THREE.Raycaster; // Untuk mendeteksi "tap"
+  pointer?: THREE.Vector2; // Untuk lokasi "tap"
+  interactiveObjects?: THREE.Mesh[]; // Daftar objek yg bisa di-tap
+}
+
+// --- FUNGSI: Untuk membuat "Sky Box" (Tombol Opsi) ---
+function createTextPlane(text: string, width = 1.5, height = 0.75): THREE.Mesh {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) return new THREE.Mesh(); // Fallback
+
+  const canvasWidth = 256;
+  const canvasHeight = 128;
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
+
+  // Latar belakang
+  context.fillStyle = 'rgba(0, 50, 100, 0.7)';
+  context.beginPath();
+  context.roundRect(0, 0, canvasWidth, canvasHeight, [20]); 
+  context.fill();
+  
+  // Border
+  context.strokeStyle = 'rgba(100, 200, 255, 1)';
+  context.lineWidth = 10;
+  context.beginPath();
+  context.roundRect(5, 5, canvasWidth - 10, canvasHeight - 10, [15]);
+  context.stroke();
+
+  // Teks
+  context.fillStyle = 'white';
+  context.font = 'bold 36px Arial';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(text, canvasWidth / 2, canvasHeight / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const geometry = new THREE.PlaneGeometry(width, height);
+  const material = new THREE.MeshBasicMaterial({ 
+    map: texture, 
+    transparent: true, 
+    side: THREE.DoubleSide
+  });
+  
+  const plane = new THREE.Mesh(geometry, material);
+  return plane;
+}
+
+
+/**
+ * Custom Hook to manage AR touch gestures.
+ */
+const useARGestures = (
+  stateRef: RefObject<ThreeState>, // Menggunakan stateRef
+  containerRef: RefObject<HTMLDivElement | null>
+) => {
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let lastX = 0, rotating = false, lastPinch = 0, lastY = 0, panning = false;
+    let tapStartX = 0, tapStartY = 0, isDragging = false;
+
+    const pinchDist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+    const onStart = (e: TouchEvent) => {
+      isDragging = false; // Reset status drag
+      const model = stateRef.current?.model; 
+      if (!model) return;
+
+      if (e.touches.length === 1) {
+        rotating = true;
+        lastX = e.touches[0].clientX;
+        // Catat posisi awal tap
+        tapStartX = e.touches[0].clientX; 
+        tapStartY = e.touches[0].clientY;
+      } else if (e.touches.length === 2) {
+        rotating = false; 
+        isDragging = true; // 2 jari selalu drag/pinch
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          panning = false;
+          lastPinch = pinchDist(e.touches[0], e.touches[1]);
+        } else {
+          panning = true;
+          lastY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        }
+      }
+    };
+
+    const onMove = (e: TouchEvent) => {
+      const model = stateRef.current?.model;
+      if (!model) return;
+
+      // Cek apakah jari bergerak (drag)
+      if (!isDragging && e.touches.length === 1) {
+        const dx = e.touches[0].clientX - tapStartX;
+        const dy = e.touches[0].clientY - tapStartY;
+        // Jika bergerak lebih dari threshold, ini adalah 'drag'
+        if (Math.hypot(dx, dy) > GESTURE_CONSTANTS.TAP_THRESHOLD) {
+          isDragging = true;
+        }
+      }
+
+      // Sesuai kode asli, tapi DITAMBAHKAN cek 'isDragging'
+      if (e.touches.length === 1 && rotating && isDragging) {
+        const dx = e.touches[0].clientX - lastX;
+        lastX = e.touches[0].clientX;
+        // HANYA rotrasi model
+        model.rotation.y -= dx * GESTURE_CONSTANTS.ROTATION_SENSITIVITY;
+      } else if (e.touches.length === 2 && isDragging) { 
+        
+        // Dapatkan grup utama
+        const mainGroup = stateRef.current?.mainGroup;
+        if (!mainGroup) return; // Jika belum ada, jangan lakukan apa-apa
+
+        if (panning) {
+          const y = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          const dy = y - lastY;
+          lastY = y;
+          // Geser grup utama
+          mainGroup.position.z += dy * GESTURE_CONSTANTS.PAN_SENSITIVITY;
+        } else {
+          const d = pinchDist(e.touches[0], e.touches[1]);
+          const scaleChange = (d - lastPinch) * GESTURE_CONSTANTS.SCALE_SENSITIVITY;
+          const newScale = THREE.MathUtils.clamp(
+            // Dapatkan skala dari grup utama
+            mainGroup.scale.x + scaleChange,
+            GESTURE_CONSTANTS.MIN_SCALE,
+            GESTURE_CONSTANTS.MAX_SCALE
+          );
+          lastPinch = d;
+          // Atur skala grup utama
+          mainGroup.scale.set(newScale, newScale, newScale);
+        }
+      }
+    };
+
+    const onEnd = (e: TouchEvent) => {
+      // Logika untuk mendeteksi 'tap'
+      if (!isDragging && e.changedTouches.length === 1) {
+        // Jika tidak dragging, ini adalah 'tap'.
+        const state = stateRef.current;
+        
+        // Jalankan 'tap'
+        if (state && state.camera && state.raycaster && state.pointer && state.interactiveObjects) {
+          
+          // Hitung posisi pointer di koordinat three.js (-1 s/d +1)
+          state.pointer.x = (tapStartX / window.innerWidth) * 2 - 1;
+          state.pointer.y = -(tapStartY / window.innerHeight) * 2 + 1;
+
+          // "Tembakkan" sinar dari kamera ke titik tap
+          state.raycaster.setFromCamera(state.pointer, state.camera);
+          
+          // Cek apakah sinar mengenai salah satu tombol
+          const intersects = state.raycaster.intersectObjects(state.interactiveObjects);
+
+          if (intersects.length > 0) {
+            // Jika kena, ambil objek pertama
+            const firstIntersect = intersects[0].object;
+            if (firstIntersect.userData.URL) {
+              console.log("Membuka URL:", firstIntersect.userData.URL);
+              // Buka link di tab baru
+              window.open(firstIntersect.userData.URL, '_blank'); 
+            }
+          }
+        }
+      }
+
+      // Reset semua status
+      rotating = false;
+      panning = false;
+      isDragging = false;
+    };
+
+    container.addEventListener("touchstart", onStart, { passive: true });
+    container.addEventListener("touchmove", onMove, { passive: true });
+    container.addEventListener("touchend", onEnd);
+
+    return () => {
+      container.removeEventListener("touchstart", onStart);
+      container.removeEventListener("touchmove", onMove);
+      container.removeEventListener("touchend", onEnd);
+    };
+  }, [stateRef, containerRef]);
+};
+
+
+/**
+ * Main hook to set up and manage the entire Three.js AR scene.
+ * MODIFIKASI: Hook ini sekarang menerima prop untuk 'setArButton'
+ */
+const useAREffect = (
+  containerRef: RefObject<HTMLDivElement | null>,
+  // BARU: Prop untuk mengirim tombol AR ke 'Page' component
+  setArButton: (button: HTMLButtonElement) => void 
+) => {
+  const stateRef = useRef<ThreeState>({});
+  const modelInitialized = useRef(false);
+
+  useARGestures(stateRef, containerRef);
+
+  const cleanup = useCallback(() => {
+    // (Kode cleanup Anda - tidak berubah)
+    const { renderer, scene } = stateRef.current;
+    if (!renderer || !scene) return;
+
+    console.log("Cleaning up Three.js scene...");
+    renderer.setAnimationLoop(null);
+
+    scene.traverse(object => {
+      if (object instanceof THREE.Mesh) {
+        object.geometry?.dispose();
+        if (Array.isArray(object.material)) {
+          object.material.forEach(material => material.dispose());
+        } else {
+          object.material?.dispose();
+        }
+      }
+    });
+
+    renderer.dispose();
+
+    const mount = containerRef.current;
+    if (mount && mount.contains(renderer.domElement)) {
+      mount.removeChild(renderer.domElement);
+    }
+    stateRef.current = {};
+    modelInitialized.current = false;
+  }, [containerRef]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+    const clock = new THREE.Clock();
+    const listener = new THREE.AudioListener(); 
+    camera.add(listener);
+
+    // Setup untuk Interaksi / Tap
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const interactiveObjects: THREE.Mesh[] = []; 
+
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.xr.enabled = true;
+    container.appendChild(renderer.domElement);
+    scene.add(camera);
+    
+    // Simpan semua state
+    stateRef.current = { 
+        renderer, scene, camera, clock, listener, 
+        raycaster, pointer, interactiveObjects
+    };
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.5));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    dirLight.position.set(0.5, 1, 0.5);
+    scene.add(dirLight);
+
+    // --- MODIFIKASI Tombol AR ---
+    const arButton = ARButton.createButton(renderer, {
+      optionalFeatures: ["dom-overlay"],
+      domOverlay: { root: container },
+    });
+    
+    // MODIFIKASI: Sembunyikan tombol asli, tapi tetap tambahkan ke DOM
+    arButton.style.display = 'none'; 
+    container.appendChild(arButton);
+    
+    // BARU: Kirim tombol AR ke 'Page' component
+    setArButton(arButton); 
+    // ----------------------------
+
+    const handleResize = () => {
+        const { camera: cam, renderer: rend } = stateRef.current;
+        if (!cam || !rend) return;
+        cam.aspect = window.innerWidth / window.innerHeight;
+        cam.updateProjectionMatrix();
+        rend.setSize(window.innerWidth, window.innerHeight);
+    };
+    window.addEventListener('resize', handleResize);
+
+    const animate = (_: number, frame?: XRFrame) => {
+      const state = stateRef.current;
+      if (!state.renderer || !state.scene || !state.camera || !state.clock) return;
+
+      if (frame && !modelInitialized.current) {
+        modelInitialized.current = true;
+        
+        // Buat Grup Utama
+        const mainGroup = new THREE.Group();
+        mainGroup.position.set(0, -1, -2.5); // Posisi awal grup
+        mainGroup.scale.set(0.3, 0.3, 0.3); // Skala yang sudah benar
+        state.camera?.add(mainGroup);
+        state.mainGroup = mainGroup; // Simpan di state
+
+        new GLTFLoader().load(
+          MODEL_URL,
+          (gltf) => {
+            console.log("Model loaded!");
+            const model = gltf.scene;
+            
+            model.rotation.y = -Math.PI / 2;
+
+            mainGroup.add(model); // Tambahkan model ke mainGroup
+            state.model = model;
+            
+            // Play Sound on Load
+            if (state.listener) {
+              const sound = new THREE.Audio(state.listener);
+              const audioLoader = new THREE.AudioLoader();
+              audioLoader.load(SOUND_URL, function(buffer) {
+                sound.setBuffer(buffer);
+                sound.setLoop(false);
+                sound.setVolume(0.5);
+                sound.play(); 
+              }, undefined, (error) => console.error("Error loading sound:", error));
+            }
+
+            // Setup Animasi
+            if (gltf.animations?.length) {
+              const mixer = new THREE.AnimationMixer(model);
+              mixer.clipAction(gltf.animations[0]).play();
+              state.mixer = mixer;
+            }
+            
+            // Buat dan tambahkan Tombol Opsi
+            const plane1 = createTextPlane("Opsi 1");
+            plane1.position.set(1.5, 4.0, 0); // Y=2.5 agar di atas kepala
+            plane1.userData = { URL: OPTION_1_URL };
+            
+            const plane2 = createTextPlane("Opsi 2");
+            plane2.position.set(-1.5, 4.0, 0); // Y=2.5 agar di atas kepala
+            plane2.userData = { URL: OPTION_2_URL };
+            
+            mainGroup.add(plane1); 
+            mainGroup.add(plane2);
+
+            // Daftarkan tombol agar bisa di-tap
+            if (state.interactiveObjects) {
+                state.interactiveObjects.push(plane1, plane2);
+            }
+          },
+          undefined,
+          (error) => console.error("Error loading model:", error)
+        );
+      }
+      
+      const dt = state.clock.getDelta();
+      state.mixer?.update(dt);
+      
+      state.renderer.render(state.scene, state.camera);
+    };
+    
+    renderer.setAnimationLoop(animate);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      cleanup();
+    };
+  // MODIFIKASI: Tambahkan 'setArButton' sebagai dependensi
+  }, [containerRef, cleanup, setArButton]); 
+}; // <-- INI ADALAH BRACE '}' YANG HILANG
+
+
+/**
+ * The main page component.
+ * MODIFIKASI: Sekarang mengelola state UI dan me-render komponen UI kustom.
+ */
+export default function Page() {
+  const mountRef = useRef<HTMLDivElement>(null);
+  
+  // --- BARU: State untuk mengelola UI ---
+  // Menyimpan referensi ke tombol ARButton (yang tersembunyi)
+  const [arButton, setArButton] = useState<HTMLButtonElement | null>(null);
+  // Melacak apakah sesi AR sedang aktif atau tidak
+  const [isSessionActive, setIsSessionActive] = useState(false);
+  // ------------------------------------
+
+  // MODIFIKASI: Kirim 'setArButton' ke hook
+  useAREffect(mountRef, setArButton);
+
+  // --- BARU: Efek untuk mendengarkan tombol ARButton ---
+  // Kita perlu tahu kapan sesi AR dimulai dan berakhir
+  // untuk memperbarui UI kita.
+  useEffect(() => {
+    if (!arButton) return; // Jika tombol belum dibuat, keluar
+
+    // Fungsi ini akan dipanggil oleh ARButton saat sesi dimulai
+    const onSessionStart = () => {
+      setIsSessionActive(true);
+    };
+    
+    // Fungsi ini akan dipanggil oleh ARButton saat sesi berakhir
+    const onSessionEnd = () => {
+      setIsSessionActive(false);
+    };
+
+    // Pasang listener
+    arButton.addEventListener('sessionstart', onSessionStart);
+    arButton.addEventListener('sessionend', onSessionEnd);
+
+    // Bersihkan listener saat komponen di-unmount
+    return () => {
+      arButton.removeEventListener('sessionstart', onSessionStart);
+      arButton.removeEventListener('sessionend', onSessionEnd);
+    };
+  }, [arButton]); // Jalankan efek ini setiap kali 'arButton' berubah
+
+  return (
+    <div className="w-screen h-screen relative overflow-hidden">
+      {/* Container untuk Three.js (kanvas AR) */}
+      <div ref={mountRef} className="w-full h-full" />
+      
+      {/* Header asli Anda, sekarang hanya tampil SAAT sesi ARaktif */}
+      {isSessionActive && (
+        <header className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-4 py-3 bg-black/40 backdrop-blur text-white">
+          <div className="font-bold">AR Atang</div>
+          <div className="text-xs opacity-80 text-right">Tap: Opsi · 1-finger: rotate · Pinch: scale</div>
+        </header>
+      )}
+      
+      {/* BARU: Render komponen UI kustom kita */}
+      <ARUserInterface 
+        arButton={arButton}
+        isSessionActive={isSessionActive}
+      />
+    </div>
+  );
+}
+
