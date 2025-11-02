@@ -8,10 +8,10 @@ import { ARButton } from "three/examples/jsm/webxr/ARButton.js";
 // --- URL Konfigurasi (Tidak berubah) ---
 const MODEL_SCENE_SATU_URL = "/siatangwave.glb";
 const SOUND_SCENE_SATU_URL = "/scene1.mp3";
-const MODEL_SCENE_DUA_URL = "/siatang-opt.glb";
+const MODEL_SCENE_DUA_URL = "/siatang-opt.glb"; // Pastikan ini nama file Anda (yang 80MB)
 const SOUND_SCENE_DUA_URL = "/scene2.mp3";
 const OPTION_1_URL = "https.www.google.com";
-const OPTION_2_URL = "https.www.bing.com";
+const OPTION_2_URL = "https://tangerangkota.go.id/";
 
 // --- Konstanta Gestur (Tidak berubah) ---
 const GESTURE_CONSTANTS = {
@@ -197,7 +197,7 @@ const useARGestures = (
 
 /**
  * Hook utama untuk AR
- * MODIFIKASI: Trigger diubah ke TIMER 5 DETIK
+ * MODIFIKASI: Aset Scene 2 dibuat sinkron
  */
 const useAREffect = (
   containerRef: RefObject<HTMLDivElement | null>,
@@ -307,6 +307,7 @@ const useAREffect = (
         state.interactiveObjects?.splice(0, state.interactiveObjects.length);
     };
 
+    // --- FUNGSI loadScene2 (DIUBAH) ---
     const loadScene2 = () => {
         const state = stateRef.current;
         if (!state.mainGroup || !state.listener || !state.camera || !state.interactiveObjects) {
@@ -319,9 +320,11 @@ const useAREffect = (
 
         cleanupCurrentModel();
 
+        // 1. Mulai load model Scene 2
         new GLTFLoader().load(
             MODEL_SCENE_DUA_URL,
             (gltf) => {
+                // 2. SUKSES! Model sudah dimuat
                 console.log("Model Scene 2 BERHASIL dimuat!"); // Akan ditangkap
                 const model = gltf.scene;
                 model.rotation.y = -Math.PI / 2;
@@ -330,10 +333,46 @@ const useAREffect = (
                 
                 if (gltf.animations?.length) {
                     const mixer = new THREE.AnimationMixer(model);
-                    // Biarkan animasi scene 2 berulang (loop)
                     mixer.clipAction(gltf.animations[0]).play(); 
                     state.mixer = mixer;
                 }
+
+                // --- DIPINDAHKAN KE SINI ---
+                // 3. BARU: Muat audio SETELAH model siap
+                if (state.listener) {
+                    const sound = new THREE.Audio(state.listener);
+                    const audioLoader = new THREE.AudioLoader();
+                    audioLoader.load(
+                        SOUND_SCENE_DUA_URL, 
+                        function(buffer) {
+                            console.log("Suara Scene 2 BERHASIL dimuat!"); // Akan ditangkap
+                            sound.setBuffer(buffer);
+                            sound.setLoop(false);
+                            sound.setVolume(0.5);
+                            sound.play();
+                        }, 
+                        undefined, 
+                        (error) => {
+                            console.error("!!! GAGAL MEMUAT SUARA SCENE 2:", error);
+                        }
+                    );
+                }
+
+                // --- DIPINDAHKAN KE SINI ---
+                // 4. BARU: Buat tombol SETELAH model siap
+                const plane1 = createTextPlane("Opsi 1");
+                plane1.position.set(1.5, 4.0, 0);
+                plane1.userData = { URL: OPTION_1_URL };
+                
+                const plane2 = createTextPlane("Opsi 2");
+                plane2.position.set(-1.5, 4.0, 0);
+                plane2.userData = { URL: OPTION_2_URL };
+                
+                state.mainGroup?.add(plane1); 
+                state.mainGroup?.add(plane2);
+                state.interactiveObjects?.push(plane1, plane2);
+                // --- AKHIR DARI BLOK YANG DIPINDAH ---
+
             },
             undefined,
             (error) => {
@@ -342,39 +381,11 @@ const useAREffect = (
             }
         );
 
-        if (state.listener) {
-            const sound = new THREE.Audio(state.listener);
-            const audioLoader = new THREE.AudioLoader();
-            audioLoader.load(
-                SOUND_SCENE_DUA_URL, 
-                function(buffer) {
-                    console.log("Suara Scene 2 BERHASIL dimuat!"); // Akan ditangkap
-                    sound.setBuffer(buffer);
-                    sound.setLoop(false);
-                    sound.setVolume(0.5);
-                    sound.play();
-                }, 
-                undefined, 
-                (error) => {
-                    console.error("!!! GAGAL MEMUAT SUARA SCENE 2:", error);
-                    console.error("Pastikan file '" + SOUND_SCENE_DUA_URL + "' ada di folder /public");
-                }
-            );
-        }
-
-        const plane1 = createTextPlane("Opsi 1");
-        plane1.position.set(1.5, 4.0, 0);
-        plane1.userData = { URL: OPTION_1_URL };
-        
-        const plane2 = createTextPlane("Opsi 2");
-        plane2.position.set(-1.5, 4.0, 0);
-        plane2.userData = { URL: OPTION_2_URL };
-        
-        state.mainGroup?.add(plane1); 
-        state.mainGroup?.add(plane2);
-        state.interactiveObjects?.push(plane1, plane2);
+        // --- AUDIO DAN TOMBOL DIHAPUS DARI SINI ---
+        // (Dipindahkan ke dalam GLTFLoader success callback)
     };
 
+    // --- ANGGAP FUNGSI animate() TIDAK BERUBAH ---
     const animate = (_: number, frame?: XRFrame) => {
       const state = stateRef.current;
       if (!state.renderer || !state.scene || !state.camera || !state.clock) return;
@@ -409,9 +420,6 @@ const useAREffect = (
                     sound.setLoop(false);
                     sound.setVolume(0.5);
                     sound.play();
-                    
-                    // --- DIHAPUS: sound.onEnded ---
-                    // sound.onEnded = () => { ... };
                   }, 
                   undefined, 
                   (error) => {
@@ -420,27 +428,17 @@ const useAREffect = (
               );
             }
 
-            // --- DIUBAH: Setup Animasi (tanpa trigger) ---
+            // Setup Animasi (tanpa trigger)
             if (gltf.animations?.length) {
               const mixer = new THREE.AnimationMixer(model);
               const action = mixer.clipAction(gltf.animations[0]);
-              
-              // Biarkan animasi berputar normal (atau loop, tidak masalah)
               action.play();
               state.mixer = mixer;
-
-              // --- DIHAPUS: mixer.addEventListener('finished', ...) ---
-              // Trigger dipindahkan ke timer
-
             } else {
-                // FALLBACK: Jika model Scene 1 tidak punya animasi
                 console.error("Model Scene 1 tidak punya animasi!");
             }
 
-            // --- BARU: TRIGGER TIMER 5 DETIK ---
-            // Kita tidak bisa menunggu audio 20 detik (Context Lost)
-            // Kita tidak bisa menunggu animasi (mungkin juga 20 detik)
-            // Kita paksa pindah scene setelah 5 detik.
+            // TRIGGER TIMER 5 DETIK (Masih kita perlukan)
             console.log("SETTING TIMER: Pindah ke Scene 2 dalam 5 detik...");
             setTimeout(() => {
                 if (sceneStateRef.current === 'scene1') {
@@ -448,8 +446,6 @@ const useAREffect = (
                     loadScene2();
                 }
             }, 5000); // 5000 milidetik = 5 detik
-            // ------------------------------------
-
           },
           undefined,
           (error) => {
@@ -463,16 +459,11 @@ const useAREffect = (
       state.renderer.render(state.scene, state.camera);
     };
     
-    // --- DIUBAH: Menambahkan listener untuk Context Lost ---
-    // Ini tidak akan *memperbaiki* masalah, tapi akan memberi tahu kita di log
-    // saat masalah itu terjadi.
+    // Listener Context Lost
     renderer.domElement.addEventListener('webglcontextlost', (event) => {
         console.error("!!! EVENT: webglcontextlost TERJADI!", event);
         event.preventDefault();
-        // Di aplikasi nyata, kita akan mencoba me-restore context di sini
-        // tapi untuk sekarang, kita hanya log saja.
     }, false);
-    // ---------------------------------------------------
     
     renderer.setAnimationLoop(animate);
 
@@ -484,7 +475,7 @@ const useAREffect = (
 };
 
 
-// --- BARU: Komponen UI Pengganti ---
+// --- Komponen UI Pengganti (Tidak berubah) ---
 const ARUserInterface = ({ arButton, isSessionActive }: { arButton: HTMLButtonElement | null, isSessionActive: boolean }) => {
   const startAR = () => {
     arButton?.click();
@@ -505,7 +496,7 @@ const ARUserInterface = ({ arButton, isSessionActive }: { arButton: HTMLButtonEl
   );
 };
 
-// --- BARU: Komponen On-Screen Debug Console ---
+// --- Komponen On-Screen Debug Console (Tidak berubah) ---
 const OnScreenDebug = ({ messages }: { messages: string[] }) => {
   return (
     <div 
@@ -609,4 +600,5 @@ export default function Page() {
     </div>
   );
 }
+
 
