@@ -10,8 +10,8 @@ const MODEL_SCENE_SATU_URL = "/siatangwave.glb";
 const SOUND_SCENE_SATU_URL = "/scene1.mp3";
 const MODEL_SCENE_DUA_URL = "/siatang-opt.glb"; // Pastikan ini nama file Anda (yang 80MB)
 const SOUND_SCENE_DUA_URL = "/scene2.mp3";
-const OPTION_1_URL = "https.www.google.com";
-const OPTION_2_URL = "https://tangerangkota.go.id/";
+const OPTION_1_URL = "https://www.canva.com/design/DAG3z9jxlxQ/28dhWuus3M3zYuts6y7PMw/view?utm_content=DAG3z9jxlxQ&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=ha7c9efb3a3#38";
+const OPTION_2_URL = "https://www.canva.com/design/DAG3z9jxlxQ/28dhWuus3M3zYuts6y7PMw/view?utm_content=DAG3z9jxlxQ&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=ha7c9efb3a3#14";
 
 // --- Konstanta Gestur (Tidak berubah) ---
 const GESTURE_CONSTANTS = {
@@ -360,11 +360,11 @@ const useAREffect = (
 
                 // --- DIPINDAHKAN KE SINI ---
                 // 4. BARU: Buat tombol SETELAH model siap
-                const plane1 = createTextPlane("Opsi 1");
+                const plane1 = createTextPlane("Denah");
                 plane1.position.set(1.5, 4.0, 0);
                 plane1.userData = { URL: OPTION_1_URL };
                 
-                const plane2 = createTextPlane("Opsi 2");
+                const plane2 = createTextPlane("Rundown");
                 plane2.position.set(-1.5, 4.0, 0);
                 plane2.userData = { URL: OPTION_2_URL };
                 
@@ -496,6 +496,7 @@ const ARUserInterface = ({ arButton, isSessionActive }: { arButton: HTMLButtonEl
   );
 };
 
+/**
 // --- Komponen On-Screen Debug Console (Tidak berubah) ---
 const OnScreenDebug = ({ messages }: { messages: string[] }) => {
   return (
@@ -512,6 +513,7 @@ const OnScreenDebug = ({ messages }: { messages: string[] }) => {
     </div>
   );
 };
+**/
 
 
 /**
@@ -523,7 +525,7 @@ export default function Page() {
   const [arButton, setArButton] = useState<HTMLButtonElement | null>(null);
   const [isSessionActive, setIsSessionActive] = useState(false);
   
-  const [debugMessages, setDebugMessages] = useState<string[]>([]);
+  //const [debugMessages, setDebugMessages] = useState<string[]>([]);
 
   useAREffect(mountRef, setArButton);
 
@@ -542,6 +544,7 @@ export default function Page() {
     };
   }, [arButton]); 
 
+  /*
   // --- Efek "pembajak" console (Tidak berubah) ---
   useEffect(() => {
     const originalLog = console.log;
@@ -564,13 +567,13 @@ export default function Page() {
     console.log = (...args: unknown[]) => {
       originalLog.apply(console, args); 
       const message = formatArgs(args);
-      setDebugMessages(prev => [...prev.slice(-20), message]); 
+      //setDebugMessages(prev => [...prev.slice(-20), message]); 
     };
 
     console.error = (...args: unknown[]) => {
       originalError.apply(console, args); 
       const message = formatArgs(args);
-      setDebugMessages(prev => [...prev.slice(-20), `ERROR: ${message}`]); 
+      //setDebugMessages(prev => [...prev.slice(-20), `ERROR: ${message}`]); 
     };
 
     return () => {
@@ -578,6 +581,7 @@ export default function Page() {
       console.error = originalError;
     };
   }, []); 
+  */
 
   return (
     <div className="w-screen h-screen relative overflow-hidden">
@@ -595,7 +599,9 @@ export default function Page() {
         isSessionActive={isSessionActive}
       />
 
+      {/*
       <OnScreenDebug messages={debugMessages} />
+      */}
 
     </div>
   );
