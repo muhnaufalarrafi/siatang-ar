@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback, RefObject, useState } from "react";
+import Link from "next/link";
 import * as THREE from "three";
+import { SRGBColorSpace } from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { ARButton } from "three/examples/jsm/webxr/ARButton.js";
 
@@ -10,8 +12,10 @@ const MODEL_SCENE_SATU_URL = "/siatangwave.glb";
 const SOUND_SCENE_SATU_URL = "/scene1.mp3";
 const MODEL_SCENE_DUA_URL = "/siatang-opt.glb";
 const SOUND_SCENE_DUA_URL = "/scene2.mp3";
-const OPTION_1_URL = "https://www.canva.com/design/DAG3z9jxlxQ/28dhWuus3M3zYuts6y7PMw/view?utm_content=DAG3z9jxlxQ&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=ha7c9efb3a3#38";
-const OPTION_2_URL = "https://www.canva.com/design/DAG3z9jxlxQ/28dhWuus3M3zYuts6y7PMw/view?utm_content=DAG3z9jxlxQ&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=ha7c9efb3a3#14";
+const OPTION_1_URL =
+  "https://www.canva.com/design/DAG3z9jxlxQ/28dhWuus3M3zYuts6y7PMw/view?utm_content=DAG3z9jxlxQ&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=ha7c9efb3a3#38";
+const OPTION_2_URL =
+  "https://www.canva.com/design/DAG3z9jxlxQ/28dhWuus3M3zYuts6y7PMw/view?utm_content=DAG3z9jxlxQ&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=ha7c9efb3a3#14";
 
 // --- Konstanta Gestur ---
 const GESTURE_CONSTANTS = {
@@ -64,8 +68,10 @@ class AssetCacheManager {
           resolve(gltf);
         },
         (progress: ProgressEvent) => {
-          const percentComplete = (progress.loaded / progress.total) * 100;
-          console.log(`[PROGRESS] ${url}: ${percentComplete.toFixed(1)}%`);
+          if (progress.lengthComputable) {
+            const percentComplete = (progress.loaded / progress.total) * 100;
+            console.log(`[PROGRESS] ${url}: ${percentComplete.toFixed(1)}%`);
+          }
         },
         (error: unknown) => {
           reject(error);
@@ -116,7 +122,7 @@ class AssetCacheManager {
 // --- Singleton Cache Manager ---
 const cacheManager = new AssetCacheManager();
 
-// --- Preload Manager untuk server-side loading ---
+// --- Preload Manager ---
 class PreloadManager {
   private isPreloading = false;
   private preloadPromise: Promise<void> | undefined;
@@ -125,13 +131,13 @@ class PreloadManager {
     if (this.isPreloading && this.preloadPromise) {
       return this.preloadPromise;
     }
-    
+
     this.isPreloading = true;
     this.preloadPromise = this.performPreload();
-    
+
     try {
       await this.preloadPromise;
-      console.log("[PRELOAD] Semua aset berhasil di-preload di server!");
+      console.log("[PRELOAD] Semua aset berhasil di-preload!");
     } catch (error) {
       console.error("[PRELOAD ERROR]", error);
     } finally {
@@ -142,47 +148,22 @@ class PreloadManager {
   private async performPreload(): Promise<void> {
     const startTime = performance.now();
     console.log("[PRELOAD] Memulai preload aset...");
-    
+
     try {
       // Preload Scene 1
-      try {
-        console.log("[PRELOAD] Loading Scene 1 Model...");
-        await cacheManager.loadGLTF(MODEL_SCENE_SATU_URL);
-        console.log("[PRELOAD] ✓ Scene 1 Model loaded");
-      } catch (error) {
-        console.error("[PRELOAD] ✗ Scene 1 Model failed:", error);
-      }
-      
-      try {
-        console.log("[PRELOAD] Loading Scene 1 Audio...");
-        await cacheManager.loadAudio(SOUND_SCENE_SATU_URL);
-        console.log("[PRELOAD] ✓ Scene 1 Audio loaded");
-      } catch (error) {
-        console.error("[PRELOAD] ✗ Scene 1 Audio failed:", error);
-      }
-      
+      await cacheManager.loadGLTF(MODEL_SCENE_SATU_URL);
+      await cacheManager.loadAudio(SOUND_SCENE_SATU_URL);
+
       // Preload Scene 2
-      try {
-        console.log("[PRELOAD] Loading Scene 2 Model (80MB - ini yang terbesar)...");
-        await cacheManager.loadGLTF(MODEL_SCENE_DUA_URL);
-        console.log("[PRELOAD] ✓ Scene 2 Model loaded");
-      } catch (error) {
-        console.error("[PRELOAD] ✗ Scene 2 Model failed:", error);
-      }
-      
-      try {
-        console.log("[PRELOAD] Loading Scene 2 Audio...");
-        await cacheManager.loadAudio(SOUND_SCENE_DUA_URL);
-        console.log("[PRELOAD] ✓ Scene 2 Audio loaded");
-      } catch (error) {
-        console.error("[PRELOAD] ✗ Scene 2 Audio failed:", error);
-      }
-      
+      await cacheManager.loadGLTF(MODEL_SCENE_DUA_URL);
+      await cacheManager.loadAudio(SOUND_SCENE_DUA_URL);
+
       const endTime = performance.now();
       const duration = ((endTime - startTime) / 1000).toFixed(2);
       console.log(`[PRELOAD] Preload selesai dalam ${duration}s`);
     } catch (error) {
       console.error("[PRELOAD] Fatal error:", error);
+      throw error;
     }
   }
 }
@@ -210,29 +191,43 @@ function createTextPlane(text: string, width = 1.5, height = 0.75): THREE.Mesh {
   const context = canvas.getContext("2d");
   if (!context) return new THREE.Mesh();
 
-  const canvasWidth = 256;
-  const canvasHeight = 128;
+  const canvasWidth = 512;
+  const canvasHeight = 256;
   canvas.width = canvasWidth;
   canvas.height = canvasHeight;
 
-  context.fillStyle = "rgba(0, 50, 100, 0.7)";
-  context.beginPath();
-  context.roundRect(0, 0, canvasWidth, canvasHeight, [20]);
-  context.fill();
+  context.fillStyle = "rgba(0, 50, 100, 0.85)";
+  const roundRect = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number
+  ) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    ctx.fill();
+  };
+  roundRect(context, 0, 0, canvasWidth, canvasHeight, 24);
 
   context.strokeStyle = "rgba(100, 200, 255, 1)";
-  context.lineWidth = 10;
-  context.beginPath();
-  context.roundRect(5, 5, canvasWidth - 10, canvasHeight - 10, [15]);
-  context.stroke();
+  context.lineWidth = 8;
+  context.strokeRect(6, 6, canvasWidth - 12, canvasHeight - 12);
 
   context.fillStyle = "white";
-  context.font = "bold 36px Arial";
+  context.font = "bold 42px Arial";
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillText(text, canvasWidth / 2, canvasHeight / 2);
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
   const geometry = new THREE.PlaneGeometry(width, height);
   const material = new THREE.MeshBasicMaterial({
     map: texture,
@@ -240,8 +235,7 @@ function createTextPlane(text: string, width = 1.5, height = 0.75): THREE.Mesh {
     side: THREE.DoubleSide,
   });
 
-  const plane = new THREE.Mesh(geometry, material);
-  return plane;
+  return new THREE.Mesh(geometry, material);
 }
 
 // --- Hook: useARGestures ---
@@ -258,7 +252,9 @@ const useARGestures = (
       lastPinch = 0,
       lastY = 0,
       panning = false;
-    let tapStartX = 0, tapStartY = 0, isDragging = false;
+    let tapStartX = 0,
+      tapStartY = 0,
+      isDragging = false;
 
     const pinchDist = (a: Touch, b: Touch) =>
       Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -330,7 +326,6 @@ const useARGestures = (
     const onEnd = (e: TouchEvent) => {
       if (!isDragging && e.changedTouches.length === 1) {
         const state = stateRef.current;
-
         if (
           state &&
           state.camera &&
@@ -342,15 +337,11 @@ const useARGestures = (
           state.pointer.y = -(tapStartY / window.innerHeight) * 2 + 1;
           state.raycaster.setFromCamera(state.pointer, state.camera);
 
-          const intersects = state.raycaster.intersectObjects(
-            state.interactiveObjects
-          );
-
+          const intersects = state.raycaster.intersectObjects(state.interactiveObjects);
           if (intersects.length > 0) {
-            const firstIntersect = intersects[0].object;
-            if (firstIntersect.userData.URL) {
-              console.log("Membuka URL:", firstIntersect.userData.URL);
-              window.open(firstIntersect.userData.URL, "_blank");
+            const obj = intersects[0].object;
+            if (obj.userData.URL) {
+              window.open(obj.userData.URL, "_blank");
             }
           }
         }
@@ -375,21 +366,18 @@ const useARGestures = (
 // --- Hook: useAREffect ---
 const useAREffect = (
   containerRef: RefObject<HTMLDivElement | null>,
-  setArButton: (button: HTMLButtonElement) => void
-) => {
+  setArButton: (button: HTMLButtonElement | null) => void
+): { isUnsupported: boolean; stateRef: RefObject<ThreeState> } => {
   const stateRef = useRef<ThreeState>({});
   const modelInitialized = useRef(false);
   const sceneStateRef = useRef<"scene1" | "scene2">("scene1");
   const loadingRef = useRef<{ [key: string]: boolean }>({});
+  const [isUnsupported, setIsUnsupported] = useState(false);
 
   useARGestures(stateRef, containerRef);
 
   const stopAllAudio = useCallback(() => {
-    const state = stateRef.current;
-    if (state.listener) {
-      state.listener.context.close();
-      console.log("[AUDIO] Semua audio dihentikan");
-    }
+    console.log("[AUDIO] Stop Audio Context dihindari untuk reusability.");
   }, []);
 
   const stopAllAnimations = useCallback(() => {
@@ -401,56 +389,37 @@ const useAREffect = (
     }
   }, []);
 
-  const cleanup = useCallback(() => {
-    const { renderer, scene } = stateRef.current;
-    if (!renderer || !scene) return;
-    console.log("[CLEANUP] Memulai cleanup Three.js scene...");
-    
-    // Hentikan animasi loop
-    renderer.setAnimationLoop(null);
-    
-    // Hentikan semua animasi
-    stopAllAnimations();
-    
-    // Hentikan semua audio
-    stopAllAudio();
-    
-    // Dispose geometri dan material
-    scene.traverse((object) => {
-      if (object instanceof THREE.Mesh) {
-        object.geometry?.dispose();
-        if (Array.isArray(object.material)) {
-          object.material.forEach((material) => material.dispose());
-        } else {
-          object.material?.dispose();
-        }
-      }
-    });
-    
-    renderer.dispose();
-    const mount = containerRef.current;
-    if (mount && mount.contains(renderer.domElement)) {
-      mount.removeChild(renderer.domElement);
+  const init = useCallback(async () => {
+    if (stateRef.current.renderer) {
+      console.warn("[INIT] Inisialisasi sudah berjalan.");
+      return;
     }
-    
-    stateRef.current = {};
-    modelInitialized.current = false;
-    sceneStateRef.current = "scene1";
-    console.log("[CLEANUP] Cleanup selesai");
-  }, [containerRef, stopAllAudio, stopAllAnimations]);
 
-  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
+    if (!navigator.xr) {
+      console.warn("[AR SUPPORT] WebXR API tidak tersedia.");
+      setIsUnsupported(true);
+      return;
+    }
+
+    try {
+      const supported = await navigator.xr.isSessionSupported("immersive-ar");
+      if (!supported) {
+        console.warn("[AR SUPPORT] immersive-ar tidak didukung.");
+        setIsUnsupported(true);
+        return;
+      }
+    } catch (error) {
+      console.error("[AR SUPPORT ERROR]", error);
+      setIsUnsupported(true);
+      return;
+    }
+
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(
-      70,
-      window.innerWidth / window.innerHeight,
-      0.01,
-      20
-    );
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
     const clock = new THREE.Clock();
     const listener = new THREE.AudioListener();
     camera.add(listener);
@@ -460,7 +429,7 @@ const useAREffect = (
 
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.outputColorSpace = SRGBColorSpace;
     renderer.xr.enabled = true;
     container.appendChild(renderer.domElement);
     scene.add(camera);
@@ -484,7 +453,7 @@ const useAREffect = (
     const arButton = ARButton.createButton(renderer, {
       optionalFeatures: ["dom-overlay"],
       domOverlay: { root: container },
-    });
+    }) as HTMLButtonElement;
     arButton.style.display = "none";
     container.appendChild(arButton);
     setArButton(arButton);
@@ -502,13 +471,12 @@ const useAREffect = (
       const state = stateRef.current;
       if (!state.mainGroup) return;
       if (state.model) {
-        console.log("Cleaning up current model...");
         state.mainGroup.remove(state.model);
         state.model.traverse((object) => {
           if (object instanceof THREE.Mesh) {
             object.geometry?.dispose();
             if (Array.isArray(object.material)) {
-              object.material.forEach((material) => material.dispose());
+              object.material.forEach((mat) => mat.dispose());
             } else {
               object.material?.dispose();
             }
@@ -523,15 +491,16 @@ const useAREffect = (
       state.interactiveObjects?.splice(0, state.interactiveObjects.length);
     };
 
-    // --- Fungsi playAudioWithCache ---
-    const playAudioWithCache = async (
-      audioUrl: string,
-      volume = 0.5
-    ): Promise<void> => {
+    const playAudioWithCache = async (audioUrl: string, volume = 0.5): Promise<void> => {
       const state = stateRef.current;
       if (!state.listener) return;
 
       try {
+        if (state.listener.context.state === "suspended") {
+          await state.listener.context.resume();
+          console.log("[AUDIO] Audio Context di-resume.");
+        }
+
         const buffer = await cacheManager.loadAudio(audioUrl);
         const sound = new THREE.Audio(state.listener);
         sound.setBuffer(buffer);
@@ -544,12 +513,8 @@ const useAREffect = (
       }
     };
 
-    // --- Fungsi loadScene2 (Optimized) ---
     const loadScene2 = async () => {
-      if (loadingRef.current["scene2"]) {
-        console.log("[LOAD] Scene 2 sedang dimuat...");
-        return;
-      }
+      if (loadingRef.current["scene2"]) return;
 
       const state = stateRef.current;
       if (!state.mainGroup || !state.listener || !state.camera || !state.interactiveObjects) {
@@ -558,13 +523,10 @@ const useAREffect = (
       }
 
       loadingRef.current["scene2"] = true;
-      console.log("[LOAD] Memulai Scene 2...");
       sceneStateRef.current = "scene2";
-
       cleanupCurrentModel();
 
       try {
-        // Load model dengan cache
         const gltf = await cacheManager.loadGLTF(MODEL_SCENE_DUA_URL);
         const model = gltf.scene;
         model.rotation.y = -Math.PI / 2;
@@ -577,10 +539,8 @@ const useAREffect = (
           state.mixer = mixer;
         }
 
-        // Load audio dengan cache
         await playAudioWithCache(SOUND_SCENE_DUA_URL, 0.5);
 
-        // Buat interactive buttons
         const plane1 = createTextPlane("Denah");
         plane1.position.set(1.5, 4.0, 0);
         plane1.userData = { URL: OPTION_1_URL };
@@ -589,10 +549,8 @@ const useAREffect = (
         plane2.position.set(-1.5, 4.0, 0);
         plane2.userData = { URL: OPTION_2_URL };
 
-        state.mainGroup?.add(plane1);
-        state.mainGroup?.add(plane2);
+        state.mainGroup?.add(plane1, plane2);
         state.interactiveObjects?.push(plane1, plane2);
-
         console.log("[SUCCESS] Scene 2 berhasil dimuat!");
       } catch (error) {
         console.error("[ERROR] Gagal memuat Scene 2:", error);
@@ -601,26 +559,9 @@ const useAREffect = (
       }
     };
 
-    // --- Preload Scene 2 (di background) ---
-    const preloadScene2 = () => {
-      console.log("[PRELOAD] Memulai preload Scene 2...");
-      Promise.all([
-        cacheManager.loadGLTF(MODEL_SCENE_DUA_URL),
-        cacheManager.loadAudio(SOUND_SCENE_DUA_URL),
-      ])
-        .then(() => {
-          console.log("[PRELOAD] Scene 2 siap!");
-        })
-        .catch((error) => {
-          console.error("[PRELOAD ERROR]", error);
-        });
-    };
-
-    // --- Fungsi animate ---
     const animate = (_: number, frame?: XRFrame) => {
       const state = stateRef.current;
-      if (!state.renderer || !state.scene || !state.camera || !state.clock)
-        return;
+      if (!state.renderer || !state.scene || !state.camera || !state.clock) return;
 
       if (frame && !modelInitialized.current) {
         modelInitialized.current = true;
@@ -631,38 +572,27 @@ const useAREffect = (
         state.camera?.add(mainGroup);
         state.mainGroup = mainGroup;
 
-        // Load Scene 1 dengan cache
         cacheManager
           .loadGLTF(MODEL_SCENE_SATU_URL)
           .then((gltf) => {
-            console.log("[LOAD] Model Scene 1 dimuat!");
             const model = gltf.scene;
             model.rotation.y = -Math.PI / 2;
             mainGroup.add(model);
             state.model = model;
 
-            // Play audio Scene 1
             playAudioWithCache(SOUND_SCENE_SATU_URL, 0.5);
 
             if (gltf.animations?.length) {
               const mixer = new THREE.AnimationMixer(model);
-              const action = mixer.clipAction(gltf.animations[0]);
-              action.play();
+              mixer.clipAction(gltf.animations[0]).play();
               state.mixer = mixer;
-            } else {
-              console.error("Model Scene 1 tidak punya animasi!");
             }
 
-            // Trigger Scene 2 setelah 5 detik
-            console.log("[TIMER] Pindah ke Scene 2 dalam 5 detik...");
             setTimeout(() => {
               if (sceneStateRef.current === "scene1") {
                 loadScene2();
               }
             }, 5000);
-
-            // Preload Scene 2 segera (background)
-            preloadScene2();
           })
           .catch((error) => {
             console.error("[ERROR] Gagal memuat Model Scene 1:", error);
@@ -674,22 +604,59 @@ const useAREffect = (
       state.renderer.render(state.scene, state.camera);
     };
 
-    renderer.domElement.addEventListener(
-      "webglcontextlost",
-      (event) => {
-        console.error("!!! EVENT: webglcontextlost TERJADI!", event);
-        event.preventDefault();
-      },
-      false
-    );
-
     renderer.setAnimationLoop(animate);
 
     return () => {
       window.removeEventListener("resize", handleResize);
-      cleanup();
     };
-  }, [containerRef, cleanup, setArButton]);
+  }, [setArButton, containerRef]);
+
+  const cleanup = useCallback(() => {
+    const { renderer, scene } = stateRef.current;
+    if (!renderer || !scene) return;
+    console.log("[CLEANUP] Memulai cleanup Three.js scene...");
+
+    renderer.setAnimationLoop(null);
+    stopAllAnimations();
+    stopAllAudio();
+
+    scene.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.geometry?.dispose();
+        if (Array.isArray(object.material)) {
+          object.material.forEach((mat) => mat.dispose());
+        } else {
+          object.material?.dispose();
+        }
+      }
+    });
+
+    renderer.dispose();
+    const mount = containerRef.current;
+    if (mount && renderer.domElement && mount.contains(renderer.domElement)) {
+      mount.removeChild(renderer.domElement);
+    }
+
+    stateRef.current = {};
+    modelInitialized.current = false;
+    sceneStateRef.current = "scene1";
+    console.log("[CLEANUP] Cleanup selesai");
+  }, [containerRef, stopAllAudio, stopAllAnimations]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (mounted) {
+      init();
+    }
+
+    return () => {
+      mounted = false;
+      cleanup();
+      setArButton(null);
+    };
+  }, [containerRef, cleanup, setArButton, init]);
+
+  return { isUnsupported, stateRef };
 };
 
 // --- Komponen UI ---
@@ -726,21 +693,36 @@ export default function Page() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [isPreloaded, setIsPreloaded] = useState(false);
   const [preloadProgress, setPreloadProgress] = useState(0);
+  const [showSkipButton, setShowSkipButton] = useState(false);
 
-  // Preload semua aset saat component mount
+  const { isUnsupported, stateRef } = useAREffect(mountRef, setArButton);
+
+  // Handle Skip Preload
+  const handleSkipPreload = () => {
+    console.log("[PRELOAD] Pengguna menekan Skip — langsung lanjut ke AR");
+    setIsPreloaded(true);
+    setShowSkipButton(false);
+  };
+
+  // Preload effect dengan skip
   useEffect(() => {
     console.log("[APP] Memulai preload aset pada page load...");
-    
+
     const preloadTimer = setInterval(() => {
       setPreloadProgress((prev) => {
-        if (prev < 90) return prev + Math.random() * 30;
+        if (prev < 90) return Math.min(90, prev + Math.random() * 30);
         return prev;
       });
     }, 300);
 
+    const skipTimeout = setTimeout(() => {
+      setShowSkipButton(true);
+    }, 10000); // Tampilkan tombol skip setelah 10 detik
+
     const timeoutId = setTimeout(() => {
       console.warn("[APP] Preload timeout - melanjutkan dengan cache yang ada");
       clearInterval(preloadTimer);
+      clearTimeout(skipTimeout);
       setPreloadProgress(100);
       setIsPreloaded(true);
     }, 120000); // 2 menit timeout
@@ -749,6 +731,7 @@ export default function Page() {
       .preloadAllAssets()
       .then(() => {
         clearTimeout(timeoutId);
+        clearTimeout(skipTimeout);
         clearInterval(preloadTimer);
         setPreloadProgress(100);
         setIsPreloaded(true);
@@ -756,24 +739,31 @@ export default function Page() {
       })
       .catch((error) => {
         clearTimeout(timeoutId);
+        clearTimeout(skipTimeout);
         clearInterval(preloadTimer);
         console.error("[APP] Preload gagal:", error);
         setPreloadProgress(100);
-        setIsPreloaded(true); // Tetap lanjutkan meski ada error
+        setIsPreloaded(true);
       });
 
     return () => {
       clearInterval(preloadTimer);
       clearTimeout(timeoutId);
+      clearTimeout(skipTimeout);
     };
   }, []);
-
-  useAREffect(mountRef, setArButton);
 
   useEffect(() => {
     if (!arButton) return;
 
-    const onSessionStart = () => setIsSessionActive(true);
+    const onSessionStart = () => {
+      setIsSessionActive(true);
+      const listener = stateRef.current?.listener;
+      if (listener && listener.context.state !== 'running') {
+        listener.context.resume().catch(e => console.error("Gagal resume AudioContext:", e));
+      }
+    };
+
     const onSessionEnd = () => {
       console.log("[SESSION] AR session berakhir - Menghentikan semua...");
       setIsSessionActive(false);
@@ -786,22 +776,38 @@ export default function Page() {
       arButton.removeEventListener("sessionstart", onSessionStart);
       arButton.removeEventListener("sessionend", onSessionEnd);
     };
-  }, [arButton]);
-
-  // Handle cleanup saat component unmount atau session end
-  useEffect(() => {
-    return () => {
-      console.log("[UNMOUNT] Component akan di-unmount, cleanup...");
-    };
-  }, []);
+  }, [arButton, stateRef]);
 
   return (
     <div className="w-screen h-screen relative overflow-hidden">
       <div ref={mountRef} className="w-full h-full" />
 
-      {!isPreloaded && (
+      {/* Pesan perangkat tidak mendukung */}
+      {isUnsupported && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/85 text-white text-center p-6">
+          <div className="text-2xl font-bold mb-4">Perangkat Tidak Mendukung AR</div>
+          <p className="text-sm text-gray-300 max-w-md">
+            Maaf — perangkat atau browser Anda belum mendukung fitur Augmented Reality berbasis WebXR.
+            <br />
+            Untuk pengalaman AR, coba:
+          </p>
+          <ul className="text-sm text-gray-300 mt-3 list-disc list-inside max-w-md">
+            <li>Gunakan <strong>Chrome di Android</strong> (versi terbaru).</li>
+            <li>Atau gunakan <strong>Safari di iOS 17.2+</strong> (jika tersedia dukungan WebXR).</li>
+            <li>Pastikan browser Anda diperbarui dan akses kamera diizinkan.</li>
+          </ul>
+          <div className="mt-6">
+            <Link href="/" className="px-4 py-2 bg-gray-700 rounded-md text-white text-sm inline-block">
+              Tutup
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Loader preload dengan tombol skip */}
+      {!isPreloaded && !isUnsupported && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur">
-          <div className="text-white text-center">
+          <div className="text-white text-center max-w-xs px-6">
             <div className="text-3xl font-bold mb-8">AR Atang</div>
             <div className="w-64 h-2 bg-gray-700 rounded-full overflow-hidden mb-4">
               <div
@@ -809,25 +815,35 @@ export default function Page() {
                 style={{ width: `${preloadProgress}%` }}
               />
             </div>
-            <div className="text-sm text-gray-300">
+            <div className="text-sm text-gray-300 mb-6">
               Loading 3D Models... {Math.round(preloadProgress)}%
+            </div>
+
+            {showSkipButton && (
+              <button
+                onClick={handleSkipPreload}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-white transition"
+              >
+                Lewati & Mulai AR
+              </button>
+            )}
+
+            <div className="text-xs text-gray-500 mt-4">
+              File akan dimuat saat dibutuhkan
             </div>
           </div>
         </div>
       )}
 
-      {isSessionActive && (
+      {isSessionActive && !isUnsupported && (
         <header className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-4 py-3 bg-black/40 backdrop-blur text-white">
           <div className="font-bold">AR Atang</div>
-          <div className="text-xs opacity-80 text-right">
-            Tap: Opsi · 1-finger: rotate · Pinch: scale
-          </div>
+          <div className="text-xs opacity-80 text-right">Tap: Opsi · 1-finger: rotate · Pinch: scale</div>
         </header>
       )}
 
-      {isPreloaded && (
-        <ARUserInterface arButton={arButton} isSessionActive={isSessionActive} />
-      )}
+      {/* Tampilkan tombol AR bila preloaded dan perangkat mendukung */}
+      {isPreloaded && !isUnsupported && <ARUserInterface arButton={arButton} isSessionActive={isSessionActive} />}
     </div>
   );
 }
